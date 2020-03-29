@@ -1,0 +1,277 @@
+---
+title: "KIRC"
+author: "Haifeng Luo"
+date: "03/02/2020"
+output:
+  html_document:
+    highlight: tango
+    theme: flatly
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Instructions:  
+Download the dataset of all kideny cases from National Cancer Institute
+The dataset includes the clinical data and the experimental strategy data, including genotyping array, methylation array, tissue slide, RNA-seq, miRNA-seq, Diagnostic Slide, WXS and ATAT-Seq, and cnv and ssm as available variantion data was downloaded also.
+
+
+## Set the working Directory, and basic working environment
+```{r}
+setwd("~/Documents/UCSF/Courses of TICR/Biostat 214 Data Management and R/Porjects/KIRC")
+library(data.table) ## to use data.table
+library(ggplot2)  ## to use ggplot2
+library(rtemis) ### to use mplot3
+
+# to use maftools
+#if (!require("BiocManager"))
+#    install.packages("BiocManager")
+#BiocManager::install("maftools")
+library(maftools)
+
+# to have all the library for plot
+library(rtemis)
+library(ggplot2)
+library(plotly)
+library(mgcv)
+library(data.table)
+library(dplyr)
+library(tidyr)
+```
+
+
+### Load the data
+```{r}
+setwd("~/Documents/UCSF/Courses of TICR/Biostat 214 Data Management and R/Porjects/KIRC")
+KIRC_clinical <- read.csv("clinical.tsv", sep = "\t")
+KIRC_exposure <- read.csv("exposure.tsv", sep = "\t")
+#Cancer_Survival_Data <- read.csv("Cancer Survival Data.csv")
+kirc_cnv <- read.csv("KIRC_CNVs.csv")
+```
+
+
+### combine the clinical data and exposure
+```{r}
+KIRC_clinical_exposure <- merge.data.frame(KIRC_clinical, KIRC_exposure, by.x = "submitter_id", by.y = "submitter_id")
+
+str(KIRC_clinical_exposure)
+# summary(KIRC_clinical_exposure)
+```
+
+### Check dimensions, column names
+```{r}
+#dim(KIRC_clinical_exposure)
+# colnames(KIRC_clinical_exposure)
+typeof(KIRC_clinical_exposure)
+# is.data.frame(KIRC_clinical_exposure)
+```
+
+### select "Clear cell adenocarcinoma" for study
+```{r}
+summary(KIRC_clinical_exposure[,"primary_diagnosis"])
+kirc_clinical_exposure <- subset(KIRC_clinical_exposure,KIRC_clinical_exposure$primary_diagnosis=="Clear cell adenocarcinoma, NOS")
+summary(kirc_clinical_exposure[,"primary_diagnosis"])
+```
+
+
+### remove duplicate id  (although they are not duplicated row
+```{r}
+sum(duplicated(kirc_clinical_exposure[,"submitter_id"])) # check the duplicated rows, with same id
+
+kirc_clinical_exposure_working <- kirc_clinical_exposure[!duplicated(kirc_clinical_exposure$submitter_id),]
+# new subset with unique duplicated id
+
+#head(kirc_clinical_exposure_working)
+sum(duplicated(kirc_clinical_exposure_working[,"submitter_id"])) # check the number of duplicated rows
+
+#kirc_cnv <- as.data.frame(kirc_cnv) #change the dataset of survival_data to data frame
+
+#kirc_clin_exp_mol_working <- merge.data.frame(kcca_clinical_exposure_working, kirc_cnv, by.x = "submitter_id", by.y = "feature") # combine the molecular information with exposure and clinical information
+
+#library("data.table")
+#library(rtemis)
+#checkData(kirc_clin_exp_mol_working)
+
+#library(foreign)
+#write.dta(kirc_clin_exp_mol_working, "kirc_clin_exp_mol_working.dta") # save the data to stata file
+#write.table(kirc_clin_exp_mol_working, "kirc_clin_exp_mol_working.txt", sep="\t")
+#write.csv(kirc_clin_exp_mol_working, file = "kirc_clin_exp_mol_working.csv")
+
+#saveRDS(data, file = "kirc_clin_exp_mol_working.Rds")
+
+```
+
+### prepare dataset for the analysis, exposure and cnvs dataset respectively
+```{r}
+# edit the dataset with excel out of R language
+kirc_analysis <- read.csv("kirc_clin_exp_mol_working20200318.csv")
+write.csv(kirc_analysis, file = "kirc_analysis.csv")
+rownames (kirc_analysis) <- kirc_analysis$submitter_id
+checkData(kirc_analysis)
+
+kirc_analysis_cnvs <- read.csv("kirc_analysis_cnvs.csv")
+rownames (kirc_analysis_cnvs) <- kirc_analysis_cnvs$X
+rownames(kirc_analysis_cnvs)
+write.csv(kirc_analysis_cnvs, file = "kirc_analysis_cnvs.csv")
+kirc_analysis_cnvs$X <- NULL
+checkData(kirc_analysis_cnvs)
+#str(kirc_analysis_cnvs)
+setDT(kirc_analysis_cnvs)
+
+```
+
+### set days_to_death as numeric
+```{r}
+kirc_analysis_cnvs$days_to_death<- as.numeric(kirc_analysis_cnvs$days_to_death)
+```
+
+## Table 1
+######?????? wrong?
+```{r}
+#library(boot) 
+# install.packages("table1")
+#library(table1)
+#library(survival)
+#require(table1)
+#require(survival)
+require(table1)
+require(survival)
+
+kirc_analysis_table <- kirc_analysis_cnvs
+kirc_analysis_table$sex <- factor(kirc_analysis_table$gender, levels=c(1,0), labels=c("Male",                  "Female"))
+ 
+kirc_analysis_table$stage <- factor(kirc_analysis_table$stage, levels=c(1,2,3,4),         labels=c("Stage I", "Stage II", "Stage III","Stage IV"))
+
+kirc_analysis_table$phase <- factor(kirc_analysis_table$grade, levels=c(1,2,3,4),         labels=c("Phase I", "Phase II", "Phase III", "Phase IV"))
+
+label(kirc_analysis_table$stage) <- "Stage"
+label(kirc_analysis_table$age) <- "Age"
+label(kirc_analysis_table$grade) <- "Grade"
+label(kirc_analysis_table$sex) <- "Sex"
+
+units(kirc_analysis_table$age)<- "years"
+
+table1(~ age + sex + stage + grade | sex, data=kirc_analysis_table)
+
+```
+
+
+# check the normal distribution of age and days to death, and grade & stage
+```{r}
+#install.packages('ggplot2')
+library(ggplot2)
+
+ggplot(kirc_analysis, mapping = aes(age_at_index)) + geom_histogram(stat="count", na.rm = FALSE, show.legend = "Histrogram of age at diagnosis")
+
+ggplot(kirc_analysis_cnvs,mapping = aes(as.factor(stage), age)) + geom_boxplot() 
+ggplot(kirc_analysis_cnvs,mapping = aes(as.factor(OS_vital_status), stage)) + geom_boxplot() 
+# check the age_at_daignosis and days_to_death for the different stage
+
+ggplot(kirc_analysis_cnvs,mapping = aes(as.factor(grade), age)) + geom_boxplot()  
+ggplot(kirc_analysis_cnvs,mapping = aes(as.factor(OS_vital_status), grade)) + geom_boxplot()  
+# check the age_at_daignosis and days_to_death for the different stage
+
+ggplot(kirc_analysis_cnvs, mapping = aes(as.factor(OS_vital_status), age)) + geom_boxplot()
+# check the relationship between age and days_to_death
+
+ggplot(kirc_analysis_cnvs, aes(as.factor(stage), grade)) +  geom_boxplot()
+
+```
+
+## Heatmap
+### data preparation for heatmap
+```{r}
+checkData(kirc_analysis_cnvs)
+heatmap(cor(kirc_analysis_cnvs))
+```
+
+## Classification
+
+```{r}
+# data preparation
+library(rtemis)
+write.csv(kirc_analysis_cnvs, file = "kirc_reression_cnvs.csv")
+
+kirc_regression_cnvs <- read.csv("kirc_reression_cnvs.csv")
+
+str(kirc_regression_cnvs)
+kirc_regression_cnvs$x.1 <- NULL
+kirc_regression_cnvs$X <- NULL
+str(kirc_regression_cnvs)
+
+checkData(kirc_regression_cnvs)
+
+write.csv(kirc_regression_cnvs, file = "kirc_reression_cnvs.csv")
+
+#regression with the dataset
+kirc_regression_cnvs1 <- read.csv("kirc_regression_cnvs1.csv")
+
+# classification
+checkData(kirc_regression_cnvs1)
+res <- resample(kirc_regression_cnvs1)
+
+cnv.train <- kirc_regression_cnvs1[res$Subsample_1,]
+cnv.test <- kirc_regression_cnvs1[res$Subsample_1,]
+
+mod <- s.RANGER(cnv.train, cnv.test)
+mod$describe()
+mod$plot()
+
+mod2 <- elevate(kirc_regression_cnvs1)
+mod2$describe()
+mod2$plot()
+
+```
+
+#Useless
+### temp of heatmap
+```{r}
+# get a small dataset for heatmap
+#heatmap_temp <- days_to_death
+#heatmap_temp[,c("CNV_20q","CNV_10p14","CNV_4q32.1","CNV_19p","CNV_15q","CNV_Xp22.2","CNV_19q")] <- kcca_clin_exp_mol_working[,c("CNV_20q","CNV_10p14","CNV_4q32.1","CNV_19p","CNV_15q","CNV_Xp22.2","CNV_19q")]
+#str(heatmap_temp)
+
+#library(dplyr)
+#library(tidyr)
+#heatmap_temp$stagenum <- recode(heatmap_temp$stage, "Stage I" = 1, "Stage II" = 2, "Stage III" = 3, "Stage IV" = 4)
+
+#heatmap_temp1 <- heatmap_temp
+#heatmap_temp1[,c("submitter_id", "stage")] <- NULL
+#str(heatmap_temp1)
+
+#heatmap_temp1$days_to_death <- heatmap_temp1$days_to_death %>% replace_na(99999)
+# replace the NA in days_to_death to 99999, which means the people survives
+
+#heatmap(cor(heatmap_temp1))
+```
+
+
+# Load the maf data of KICR,  Supplement part for maf data
+```{r}
+#maftest <- read.maf(maf = "TCGA.KIRC.muse.maf")
+
+#maftest
+
+#getSampleSummary(maftest)
+
+#getGeneSummary(maftest)
+
+#getClinicalData(maftest)
+
+#getFields(maftest)
+
+#plotmafSummary(maf = maftest, rmOutlier = TRUE, addStat = 'median', dashboard = TRUE, titvRaw = FALSE)
+
+#oncoplot(maf = maftest, top = 10)
+```
+
+
+## Submit
+When you have finished all exercises, compile the document into HTML. Submit both the .Rmd file and the .html file by email.  
